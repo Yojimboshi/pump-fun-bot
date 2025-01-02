@@ -3,17 +3,17 @@ const { Connection, PublicKey, Keypair, Transaction, SystemProgram } = require("
 const { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = require("@solana/spl-token");
 const { struct, u64, blob } = require("buffer-layout");
 
-const PRIVATE_KEY = "YOUR_BASE58_PRIVATE_KEY";
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const RPC_ENDPOINT = "https://api.mainnet-beta.solana.com";
 const LAMPORTS_PER_SOL = 10 ** 9;
 const TOKEN_DECIMALS = 6;
 
-const PUMP_GLOBAL = new PublicKey("YOUR_PUMP_GLOBAL_ADDRESS");
-const PUMP_FEE = new PublicKey("YOUR_PUMP_FEE_ADDRESS");
+const PUMP_GLOBAL = new PublicKey("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf");
+const PUMP_FEE = new PublicKey("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM");
+const PUMP_PROGRAM = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 const SYSTEM_PROGRAM = SystemProgram.programId;
-const PUMP_PROGRAM = new PublicKey("YOUR_PUMP_PROGRAM_ADDRESS");
-const SYSTEM_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM = new PublicKey("YOUR_ASSOCIATED_TOKEN_PROGRAM_ADDRESS");
-const PUMP_EVENT_AUTHORITY = new PublicKey("YOUR_EVENT_AUTHORITY_ADDRESS");
+const SYSTEM_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const PUMP_EVENT_AUTHORITY = new PublicKey("E7vih47WnrJqzr1cYECkPMzqQUtW7H813Y3gaB6ppump");
 
 async function getTokenBalance(connection, associatedTokenAccount) {
     const response = await connection.getTokenAccountBalance(associatedTokenAccount);

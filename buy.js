@@ -1,16 +1,10 @@
-const base58 = require("bs58");
-const { Connection, PublicKey, Keypair, Transaction, SystemProgram } = require("@solana/web3.js");
-const { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } = require("@solana/spl-token");
 const WebSocket = require("ws");
+const { Connection, PublicKey, Keypair, Transaction, SystemProgram } = require("@solana/web3.js");
+const bs58 = require("bs58");
 const fs = require("fs");
 const path = require("path");
-
-const PRIVATE_KEY = "YOUR_BASE58_PRIVATE_KEY";
-const RPC_ENDPOINT = "https://api.mainnet-beta.solana.com";
-const WSS_ENDPOINT = "wss://YOUR_WEBSOCKET_ENDPOINT";
-const LAMPORTS_PER_SOL = 10 ** 9;
-const TOKEN_DECIMALS = 6;
-const MAX_RETRIES = 5;
+const { getAssociatedTokenAddress } = require("@solana/spl-token");
+const { RPC_ENDPOINT, WSS_ENDPOINT, PUMP_PROGRAM, PRIVATE_KEY, LAMPORTS_PER_SOL, TOKEN_DECIMALS } = require("./config");
 
 async function getPumpCurveState(connection, curveAddress) {
     const accountInfo = await connection.getAccountInfo(curveAddress);
@@ -18,7 +12,7 @@ async function getPumpCurveState(connection, curveAddress) {
         throw new Error("Invalid curve state: No data");
     }
 
-    const layout = {
+    return {
         virtualTokenReserves: accountInfo.data.readBigUInt64LE(8),
         virtualSolReserves: accountInfo.data.readBigUInt64LE(16),
         realTokenReserves: accountInfo.data.readBigUInt64LE(24),
@@ -26,8 +20,6 @@ async function getPumpCurveState(connection, curveAddress) {
         tokenTotalSupply: accountInfo.data.readBigUInt64LE(40),
         complete: accountInfo.data[48] === 1,
     };
-
-    return layout;
 }
 
 function calculatePumpCurvePrice(curveState) {
@@ -41,9 +33,9 @@ function calculatePumpCurvePrice(curveState) {
     );
 }
 
-async function buyToken(mint, bondingCurve, associatedBondingCurve, amount, slippage = 0.01) {
+async function buyToken(mint, bondingCurve, associatedBondingCurve, amount, slippage = 0.01, maxRetries = 5) {
     const connection = new Connection(RPC_ENDPOINT, "confirmed");
-    const privateKey = base58.decode(PRIVATE_KEY);
+    const privateKey = bs58.decode(PRIVATE_KEY);
     const payer = Keypair.fromSecretKey(privateKey);
 
     const associatedTokenAccount = await getAssociatedTokenAddress(mint, payer.publicKey);
@@ -54,18 +46,19 @@ async function buyToken(mint, bondingCurve, associatedBondingCurve, amount, slip
     const tokenAmount = amount / tokenPriceSol;
     const maxAmountLamports = Math.floor(amountLamports * (1 + slippage));
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             const accountInfo = await connection.getAccountInfo(associatedTokenAccount);
             if (!accountInfo) {
                 console.log("Creating associated token account...");
 
-                const ataInstruction = createAssociatedTokenAccountInstruction(
-                    payer.publicKey,
-                    associatedTokenAccount,
-                    payer.publicKey,
-                    mint
-                );
+                const ataInstruction = SystemProgram.createAccount({
+                    fromPubkey: payer.publicKey,
+                    newAccountPubkey: associatedTokenAccount,
+                    space: 165,
+                    lamports: await connection.getMinimumBalanceForRentExemption(165),
+                    programId: TOKEN_PROGRAM_ID,
+                });
                 const ataTransaction = new Transaction().add(ataInstruction);
                 const blockhash = await connection.getLatestBlockhash();
                 ataTransaction.recentBlockhash = blockhash.blockhash;
@@ -79,14 +72,14 @@ async function buyToken(mint, bondingCurve, associatedBondingCurve, amount, slip
             break;
         } catch (error) {
             console.error(`ATA creation attempt ${attempt + 1} failed:`, error.message);
-            if (attempt === MAX_RETRIES - 1) {
+            if (attempt === maxRetries - 1) {
                 throw new Error("Failed to create associated token account after maximum retries.");
             }
             await new Promise(resolve => setTimeout(resolve, 2 ** attempt * 1000));
         }
     }
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             const accounts = [
                 { pubkey: bondingCurve, isSigner: false, isWritable: true },
@@ -94,7 +87,6 @@ async function buyToken(mint, bondingCurve, associatedBondingCurve, amount, slip
                 { pubkey: associatedTokenAccount, isSigner: false, isWritable: true },
                 { pubkey: payer.publicKey, isSigner: true, isWritable: true },
                 { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-                { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
             ];
 
             const data = Buffer.concat([
@@ -118,7 +110,7 @@ async function buyToken(mint, bondingCurve, associatedBondingCurve, amount, slip
             return signature;
         } catch (error) {
             console.error(`Transaction attempt ${attempt + 1} failed:`, error.message);
-            if (attempt === MAX_RETRIES - 1) {
+            if (attempt === maxRetries - 1) {
                 throw new Error("Failed to complete transaction after maximum retries.");
             }
             await new Promise(resolve => setTimeout(resolve, 2 ** attempt * 1000));
@@ -126,4 +118,43 @@ async function buyToken(mint, bondingCurve, associatedBondingCurve, amount, slip
     }
 }
 
-module.exports = { buyToken };
+async function listenForCreateTransaction() {
+    const websocket = new WebSocket(WSS_ENDPOINT);
+
+    websocket.on("open", () => {
+        const subscriptionMessage = JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "blockSubscribe",
+            params: [
+                { mentionsAccountOrProgram: PUMP_PROGRAM },
+                {
+                    commitment: "confirmed",
+                    encoding: "base64",
+                    showRewards: false,
+                    transactionDetails: "full",
+                    maxSupportedTransactionVersion: 0,
+                },
+            ],
+        });
+        websocket.send(subscriptionMessage);
+        console.log("Subscribed to blocks mentioning program.");
+    });
+
+    websocket.on("message", (data) => {
+        const parsedData = JSON.parse(data);
+        if (parsedData.method === "blockNotification") {
+            console.log("Received block notification", parsedData);
+        }
+    });
+
+    websocket.on("error", (error) => {
+        console.error("WebSocket error:", error.message);
+    });
+
+    websocket.on("close", () => {
+        console.log("WebSocket closed.");
+    });
+}
+
+module.exports = { getPumpCurveState, calculatePumpCurvePrice, buyToken, listenForCreateTransaction };

@@ -1,3 +1,4 @@
+require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const WebSocket = require("ws");
@@ -6,8 +7,8 @@ const { createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID } = require("@
 const { getPumpCurveState, calculatePumpCurvePrice, buyToken, listenForCreateTransaction } = require("./buy.js");
 const { sellToken } = require("./sell.js");
 
-const RPC_ENDPOINT = "https://api.mainnet-beta.solana.com"; // Update with your endpoint
-const WSS_ENDPOINT = "wss://example.com/ws"; // Update with your WebSocket endpoint
+const RPC_ENDPOINT = process.env.RPC_ENDPOINT; // Load from .env
+const WSS_ENDPOINT = process.env.WSS_ENDPOINT; // Load from .env
 const BUY_AMOUNT = 1.0;
 const BUY_SLIPPAGE = 0.01;
 const SELL_SLIPPAGE = 0.01;
@@ -69,20 +70,20 @@ async function trade(websocket, matchString = null, broAddress = null, marryMode
             console.log("Buy transaction failed.");
         }
 
-        if (!marryMode) {
-            console.log("Waiting for 20 seconds before selling...");
-            await new Promise(resolve => setTimeout(resolve, 20000));
+        // if (!marryMode) {
+        //     console.log("Waiting for 20 seconds before selling...");
+        //     await new Promise(resolve => setTimeout(resolve, 20000));
 
-            console.log(`Selling tokens with ${(SELL_SLIPPAGE * 100).toFixed(1)}% slippage tolerance...`);
-            const sellTxHash = await sellToken(mint, bondingCurve, associatedBondingCurve, SELL_SLIPPAGE);
-            if (sellTxHash) {
-                logTrade("sell", tokenData, tokenPriceSol, sellTxHash);
-            } else {
-                console.log("Sell transaction failed or no tokens to sell.");
-            }
-        } else {
-            console.log("Marry mode enabled. Skipping sell operation.");
-        }
+        //     console.log(`Selling tokens with ${(SELL_SLIPPAGE * 100).toFixed(1)}% slippage tolerance...`);
+        //     const sellTxHash = await sellToken(mint, bondingCurve, associatedBondingCurve, SELL_SLIPPAGE);
+        //     if (sellTxHash) {
+        //         logTrade("sell", tokenData, tokenPriceSol, sellTxHash);
+        //     } else {
+        //         console.log("Sell transaction failed or no tokens to sell.");
+        //     }
+        // } else {
+        //     console.log("Marry mode enabled. Skipping sell operation.");
+        // }
 
         if (!yoloMode) break;
     }
