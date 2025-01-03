@@ -88,6 +88,3 @@ cython_debug/
 
 # Node.js
 node_modules/
-
-# Custom exclusions
-learning-examples/
